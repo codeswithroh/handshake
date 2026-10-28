@@ -131,10 +131,16 @@ function useJobEvents(jobId: bigint) {
           evts.push({ step: 'Rejected', ts: tsMap.get(rejected.blockNumber ?? 0n) ?? 0, txHash: rejected.transactionHash ?? '', detail: refund, accent: 'var(--red)' })
         }
 
-        const refunded = results[5].status === 'fulfilled' ? results[5].value.find(() => !rejected) : null
+        // Only show a "Expired · refunded" timeline step when the Refunded event
+        // came from a claimRefund() call — i.e. its tx hash is NOT the same as
+        // the JobRejected tx (where the Refunded is just the internal payout).
+        const rejectedTxHash = rejected?.transactionHash ?? null
+        const refunded = results[5].status === 'fulfilled'
+          ? results[5].value.find(l => l.transactionHash !== rejectedTxHash)
+          : null
         if (refunded) {
           const args = (refunded as Log & { args?: { amount?: bigint } }).args
-          evts.push({ step: 'Refunded', ts: tsMap.get(refunded.blockNumber ?? 0n) ?? 0, txHash: refunded.transactionHash ?? '', detail: args?.amount != null ? `$${formatUsdc(args.amount)} returned` : '', accent: 'var(--red)' })
+          evts.push({ step: 'Expired · refunded', ts: tsMap.get(refunded.blockNumber ?? 0n) ?? 0, txHash: refunded.transactionHash ?? '', detail: args?.amount != null ? `$${formatUsdc(args.amount)} returned` : '', accent: 'var(--red)' })
         }
 
         // Track first arrival of submit for typewriter trigger

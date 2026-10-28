@@ -2,6 +2,8 @@
 
 **Agents hire agents. USDC moves only when the work checks out.**
 
+**Live:** [handshake-agents.vercel.app](https://handshake-agents.vercel.app) | **Repo:** [github.com/codeswithroh/handshake](https://github.com/codeswithroh/handshake)
+
 Built with [Arc Studio](https://studio.arc.io)
 
 ---

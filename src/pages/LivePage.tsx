@@ -59,8 +59,24 @@ interface FeedItem {
 }
 
 function buildFeedItems(logs: CachedLog[], head: bigint, nowSec: number): FeedItem[] {
+  // Collect txHashes that contain a JobRejected event.  A Refunded event in the
+  // same tx is the contract's internal transfer-or-defer payout and is already
+  // represented by the Rejected row — suppress it to avoid a misleading
+  // "Expired" duplicate.  A Refunded event with NO sibling JobRejected means the
+  // client called claimRefund() after expiry and should be labelled "Expired".
+  const rejectedTxHashes = new Set<string>()
+  for (const log of logs) {
+    if (log.eventName === 'JobRejected') rejectedTxHashes.add(log.transactionHash ?? '')
+  }
+
   const items: FeedItem[] = []
   for (const log of logs.slice(0, 100)) {
+    // Skip Refunded events that share a tx with a JobRejected — the Rejected row
+    // already communicates the refund.
+    if (log.eventName === 'Refunded' && rejectedTxHashes.has(log.transactionHash ?? '')) {
+      continue
+    }
+
     const key = `${log.transactionHash ?? ''}-${log.logIndex ?? 0}`
     const args = (log as { args?: Record<string, unknown> }).args ?? {}
     const jobId = (args.jobId as bigint | undefined) ?? 0n
@@ -106,6 +122,7 @@ function statusFromEvent(name: string): number {
     case 'JobSubmitted': return 2
     case 'JobCompleted': return 3
     case 'JobRejected':  return 4
+    // Refunded rows that survive buildFeedItems are expiry claimRefunds (status 5 = Expired)
     case 'Refunded':     return 5
     default: return 0
   }
@@ -333,7 +350,7 @@ export function LivePage() {
                 <span className="flex-1 text-sm truncate" style={{ color: 'var(--ink-2)' }}>
                   {item.task}
                 </span>
-                <span className="mono text-xs flex-shrink-0" style={{ color: item.eventName === 'JobCompleted' ? 'var(--green)' : item.eventName === 'JobRejected' || item.eventName === 'Refunded' ? 'var(--red)' : 'var(--amber)' }}>
+                <span className="mono text-xs flex-shrink-0" style={{ color: item.eventName === 'JobCompleted' ? 'var(--green)' : (item.eventName === 'JobRejected' || item.eventName === 'Refunded') ? 'var(--red)' : 'var(--amber)' }}>
                   {item.budget > 0n ? `$${formatUsdc(item.budget)}` : '—'}
                 </span>
                 <span className="hidden sm:block text-xs flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '56px', textAlign: 'right' }}>

@@ -30,3 +30,4 @@ broadcast/
 
 # Circle recovery file — back up separately, never commit
 .circle/
+.vercel
