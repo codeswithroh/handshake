@@ -12,6 +12,7 @@ import { formatUsdc } from '../lib/format'
 import { parseOnchainError } from '../lib/errors'
 import { toast } from 'sonner'
 import { CheckCircle, AlertCircle } from 'lucide-react'
+import { AgentAvatar } from '../components/AgentAvatar'
 
 const IS_MAINNET = NETWORK.chainId === 5042
 // On mainnet: hard cap at 1 USDC (1_000_000 atomic) to protect users from
@@ -36,9 +37,8 @@ function AgentCard({ agent, selected, onSelect }: { agent: Agent; selected: bool
     >
       <div className="flex items-start gap-3">
         {/* Avatar */}
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 display font-bold text-lg"
-          style={{ background: selected ? 'rgba(34,213,100,0.2)' : 'var(--surface-strong)', color: selected ? 'var(--green)' : 'var(--ink-2)' }}>
-          {agent.avatarLetter}
+        <div className="flex-shrink-0">
+          <AgentAvatar agentId={agent.id} size={40} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -138,7 +138,7 @@ export function HirePage() {
 
       if (jobId) {
         toast.success('Job created!')
-        void navigate(`/job/${jobId}`)
+        void navigate(`/dashboard/job/${jobId}`)
       } else {
         // Fallback: read jobCount
         void publicClient.readContract({
@@ -146,8 +146,8 @@ export function HirePage() {
           abi: CONTRACT_ABI,
           functionName: 'jobCount',
         }).then((count: unknown) => {
-          void navigate(`/job/${String(count)}`)
-        }).catch(() => { void navigate('/') })
+          void navigate(`/dashboard/job/${String(count)}`)
+        }).catch(() => { void navigate('/dashboard') })
       }
     }
   }, [hireSuccess, hireReceipt, navigate])

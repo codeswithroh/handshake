@@ -1,35 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Arc Dark "settlement terminal" tokens ──────────────────────── */
+/* ── Landing page tokens (light) ────────────────────────────────── */
 :root {
-  /* Canvas */
-  --bg:             #09090b;
-  --bg-panel:       #111116;
-  --bg-raised:      #18181f;
+  --land-bg:        #f7f7f8;
+  --land-card:      #ffffff;
+  --land-ink:       #0f0f11;
+  --land-ink2:      #6b7280;
+  --land-border:    rgba(0,0,0,0.08);
+  --land-accent:    #16a34a;   /* green CTA */
+  --land-accent-fg: #ffffff;
+  --land-dot:       rgba(0,0,0,0.06);
+}
 
-  /* Glass surfaces */
-  --surface:        rgba(255,255,255,0.045);
+/* ── Dashboard tokens (dark) ─────────────────────────────────────── */
+:root {
+  --bg:             #0d0d10;
+  --bg-panel:       #111114;
+  --bg-raised:      #16161a;
+
+  --surface:        rgba(255,255,255,0.04);
   --surface-strong: rgba(255,255,255,0.08);
+  --surface-hover:  rgba(255,255,255,0.06);
 
-  /* Typography */
-  --ink:            #f4f4f5;
-  --ink-2:          #a1a1aa;
-  --muted:          #71717a;
+  --ink:            #f1f1f3;
+  --ink-2:          #9b9ba8;
+  --muted:          #606070;
 
-  /* Borders */
-  --border:         rgba(255,255,255,0.09);
-  --border-strong:  rgba(255,255,255,0.18);
+  --border:         rgba(255,255,255,0.08);
+  --border-strong:  rgba(255,255,255,0.15);
 
-  /* Semantic accent trio */
-  --green:          #22d564;   /* settled / paid */
-  --amber:          #f59e0b;   /* pending / escrow */
-  --red:            #f43f5e;   /* rejected / refunded */
+  --green:          #22d564;
+  --amber:          #f59e0b;
+  --red:            #f43f5e;
+  --indigo:         #818cf8;
 
-  /* Primary CTA */
   --accent:         #22d564;
   --accent-dark:    #0ea549;
+
+  /* Sidebar */
+  --sidebar-w:      220px;
+  --sidebar-bg:     #0d0d10;
 }
 
 * { box-sizing: border-box; }
@@ -47,32 +61,55 @@ body {
 }
 
 /* Font helpers */
-.display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.03em; }
+.display { font-family: 'Space Grotesk', sans-serif; }
 .mono    { font-family: 'JetBrains Mono', Menlo, monospace; }
 
-/* Scrollbar styling */
+/* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
 
 /* Focus ring */
 :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
-/* Animated entry for new feed rows */
+/* ── Dashboard layout ────────────────────────────────────────────── */
+.dash-root {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+.dash-sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
+}
+.dash-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  height: 100dvh;
+}
+
+/* ── Animations ──────────────────────────────────────────────────── */
 @keyframes slideInRow {
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .animate-slide-in { animation: slideInRow 0.3s ease-out forwards; }
 
-/* Pulse for live indicator */
 @keyframes livePulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.3; }
 }
 .animate-live { animation: livePulse 1.6s ease-in-out infinite; }
 
-/* USDC dot travel animation for money-flow */
 @keyframes moveDot {
   0%   { opacity: 0; transform: translateX(0); }
   20%  { opacity: 1; }
@@ -80,5 +117,36 @@ body {
   100% { opacity: 0; transform: translateX(24px); }
 }
 
-/* Toast overrides — dark bg */
+@keyframes floatA {
+  0%, 100% { transform: translateY(0px) rotate(-2deg); }
+  50%       { transform: translateY(-10px) rotate(-2deg); }
+}
+@keyframes floatB {
+  0%, 100% { transform: translateY(0px) rotate(3deg); }
+  50%       { transform: translateY(-14px) rotate(3deg); }
+}
+@keyframes floatC {
+  0%, 100% { transform: translateY(0px) rotate(1deg); }
+  50%       { transform: translateY(-8px) rotate(1deg); }
+}
+.float-a { animation: floatA 5s ease-in-out infinite; }
+.float-b { animation: floatB 6.5s ease-in-out infinite; }
+.float-c { animation: floatC 4.5s ease-in-out infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up-1 { animation: fadeUp 0.6s 0.1s both ease-out; }
+.fade-up-2 { animation: fadeUp 0.6s 0.25s both ease-out; }
+.fade-up-3 { animation: fadeUp 0.6s 0.4s both ease-out; }
+.fade-up-4 { animation: fadeUp 0.6s 0.55s both ease-out; }
+
+/* Toast overrides */
 [data-sonner-toaster] { font-family: 'DM Sans', sans-serif !important; }
+
+/* Dot grid background for landing */
+.dot-grid {
+  background-image: radial-gradient(var(--land-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+}

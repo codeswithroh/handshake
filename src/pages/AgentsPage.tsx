@@ -8,6 +8,7 @@ import { formatUsdc, fmtAddr } from '../lib/format'
 import { addrUrl } from '../lib/explorer'
 import { parseOnchainError } from '../lib/errors'
 import { ExternalLink, Download } from 'lucide-react'
+import { AgentAvatar } from '../components/AgentAvatar'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
 
@@ -48,9 +49,8 @@ function AgentCard({ agent, stats, onHire }: {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center display font-bold text-xl flex-shrink-0"
-            style={{ background: agent.isChaosMonkey ? 'rgba(244,63,94,0.15)' : 'rgba(34,213,100,0.12)', color: agent.isChaosMonkey ? 'var(--red)' : 'var(--green)' }}>
-            {agent.avatarLetter}
+          <div className="flex-shrink-0">
+            <AgentAvatar agentId={agent.id} size={48} />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -181,7 +181,7 @@ export function AgentsPage() {
             agent={agent}
             stats={result[i]?.stats}
             owed={result[i]?.owed}
-            onHire={() => navigate('/hire')}
+            onHire={() => navigate(`/dashboard/hire?agent=${agent.id}`)}
           />
         ))}
       </div>
@@ -189,8 +189,7 @@ export function AgentsPage() {
       {/* Sentinel card */}
       <div className="rounded-2xl p-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-start gap-4 mb-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center display font-bold text-xl flex-shrink-0"
-            style={{ background: 'rgba(165,180,252,0.12)', color: '#a5b4fc' }}>S</div>
+          <div className="flex-shrink-0"><AgentAvatar agentId="sentinel" size={48} /></div>
           <div>
             <span className="font-semibold" style={{ color: 'var(--ink)' }}>Sentinel</span>
             <span className="text-xs ml-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(165,180,252,0.12)', color: '#a5b4fc' }}>evaluator</span>

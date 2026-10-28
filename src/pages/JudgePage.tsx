@@ -140,7 +140,7 @@ export function JudgePage() {
           </p>
           <div className="flex gap-3 flex-wrap">
             <button
-              onClick={() => { void navigate('/hire?agent=bard&task=Write+a+haiku+about+trustless+escrow') }}
+              onClick={() => { void navigate('/dashboard/hire?agent=bard&task=Write+a+haiku+about+trustless+escrow') }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-[0.99]"
               style={{ background: 'var(--green)', color: '#09090b' }}
             >
@@ -182,7 +182,7 @@ export function JudgePage() {
           </p>
           <div className="flex gap-3 flex-wrap">
             <button
-              onClick={() => { void navigate('/hire?agent=lazy') }}
+              onClick={() => { void navigate('/dashboard/hire?agent=lazy') }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-[0.99]"
               style={{ background: 'rgba(244,63,94,0.2)', color: 'var(--red)', border: '1px solid rgba(244,63,94,0.3)' }}
             >
@@ -223,7 +223,7 @@ export function JudgePage() {
           </p>
           <div className="flex gap-3 flex-wrap">
             <button
-              onClick={() => { void navigate('/break-it') }}
+              onClick={() => { void navigate('/dashboard/break-it') }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-[0.99]"
               style={{ background: 'var(--surface-strong)', color: 'var(--ink)', border: '1px solid var(--border)' }}
             >
@@ -269,7 +269,7 @@ export function JudgePage() {
               sub="contracts/AgenticCommerce.sol  •  84 tests"
             />
             <LinkCard
-              href="/docs/AUDIT.md"
+              href="https://github.com/codeswithroh/handshake/blob/main/docs/AUDIT.md"
               label="Security audit report"
               sub="10 findings fixed  •  max severity preset"
               color="var(--amber)"

@@ -78,15 +78,15 @@ const activeChain = env === 'mainnet' ? arcMainnet : arcTestnet
 // Public RPC endpoints per network — fallback transport tries each in order.
 // Spreading the load across multiple providers avoids rate-limit stalls.
 export const TESTNET_RPCS = [
-  'https://rpc.testnet.arc.io',
   'https://rpc.quicknode.testnet.arc.io',
+  'https://rpc.testnet.arc.io',
   'https://rpc.drpc.testnet.arc.io',
   'https://rpc.blockdaemon.testnet.arc.io',
 ]
 
 export const MAINNET_RPCS = [
-  'https://rpc.mainnet.arc.io',
   'https://rpc.quicknode.mainnet.arc.io',
+  'https://rpc.mainnet.arc.io',
   'https://rpc.drpc.mainnet.arc.io',
   'https://rpc.blockdaemon.mainnet.arc.io',
 ]

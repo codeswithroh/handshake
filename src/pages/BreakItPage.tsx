@@ -2,168 +2,143 @@
  * /break-it — "Try to cheat Handshake"
  *
  * Each button fires a read-only eth_call simulation (no signing, no tx)
- * against the live contract from the connected wallet's address, then
- * decodes the reverted custom error and shows it as "Refused: ErrorName".
+ * against real jobs on the live contract, impersonating the relevant
+ * party (eth_call accepts any `from`), then decodes the reverted custom
+ * error and shows it as "Refused: ErrorName".
  *
  * Nothing is sent onchain.
  */
 import { useState } from 'react'
-import { useAccount } from 'wagmi'
-import { encodeFunctionData, decodeFunctionResult, decodeErrorResult, keccak256, toBytes, toHex, encodeAbiParameters, parseAbiParameters } from 'viem'
-import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../contract'
+import { BaseError, ContractFunctionRevertedError, keccak256, toBytes, toHex } from 'viem'
+import { CONTRACT_ADDRESS, CONTRACT_ABI, JobStatus, type JobStruct } from '../contract'
+import { NETWORK } from '../config'
 import { publicClient } from '../lib/eventCache'
 import { ChainGuard } from '../components/ChainGuard'
 import { ShieldAlert, CheckCircle2, Loader2 } from 'lucide-react'
 import type { Abi } from 'viem'
 
-// ── Error decoding ─────────────────────────────────────────────────
+// A wallet with no role on any job
+const STRANGER = '0x000000000000000000000000000000000000dEaD' as const
+const ZERO_REASON = `0x${'00'.repeat(32)}` as const
 
-const KNOWN_ERRORS: Record<string, string> = {
-  NotEvaluator:       'NotEvaluator',
-  NotProvider:        'NotProvider',
-  NotClient:          'NotClient',
-  WrongStatus:        'WrongStatus',
-  HashMismatch:       'HashMismatch',
-  NotExpired:         'NotExpired',
-  Expired:            'Expired',
-  ExpiryInPast:       'ExpiryInPast',
-  ExpiryTooFar:       'ExpiryTooFar',
-  BudgetZero:         'BudgetZero',
-  EvaluatorFeeTooHigh:'EvaluatorFeeTooHigh',
-  NothingOwed:        'NothingOwed',
-}
+// ── Target jobs ────────────────────────────────────────────────────
+// Attacks run against real, already-settled jobs so the contract's own
+// role and status checks are what refuse them.
 
-function decodeRevert(data: string): string {
-  const hexData = data as `0x${string}`
-  // Try to match known 4-byte selectors
-  const sel = hexData.slice(0, 10).toLowerCase()
-  for (const name of Object.keys(KNOWN_ERRORS)) {
-    const sig = `${name}()`
-    const hash = keccak256(toBytes(sig)).slice(0, 10).toLowerCase()
-    if (hash === sel) return KNOWN_ERRORS[name]
+interface Targets { settled: JobStruct; rejected: JobStruct | null }
+
+let targetsPromise: Promise<Targets> | null = null
+
+async function loadTargets(): Promise<Targets> {
+  const count = await publicClient.readContract({
+    address: CONTRACT_ADDRESS, abi: CONTRACT_ABI as Abi, functionName: 'jobCount',
+  }) as bigint
+  let settled: JobStruct | null = null
+  let rejected: JobStruct | null = null
+  for (let id = 1n; id <= count && (!settled || !rejected); id++) {
+    const job = await publicClient.readContract({
+      address: CONTRACT_ADDRESS, abi: CONTRACT_ABI as Abi, functionName: 'getJob', args: [id],
+    }) as JobStruct
+    if (!settled && job.status === JobStatus.Completed) settled = job
+    if (!rejected && job.status === JobStatus.Rejected) rejected = job
   }
-  // Try viem's decodeErrorResult against the full ABI
-  try {
-    const result = decodeErrorResult({ abi: CONTRACT_ABI as Abi, data: hexData })
-    return result.errorName
-  } catch { /* ignore */ }
-  // Raw selector fallback
-  return `0x${hexData.slice(2, 10)}`
+  if (!settled) throw new Error('No completed job yet')
+  return { settled, rejected }
 }
 
-// A "dummy" non-existent job id for attacks that don't need a real job
-const DUMMY_JOB_ID = 99999999n
+function getTargets(): Promise<Targets> {
+  targetsPromise ??= loadTargets().catch((e: unknown) => { targetsPromise = null; throw e })
+  return targetsPromise
+}
+
+// ── Simulation ─────────────────────────────────────────────────────
+
+type AttackResult = { refused: boolean; error: string }
+
+async function simulate(from: `0x${string}`, functionName: string, args: unknown[]): Promise<AttackResult> {
+  try {
+    await publicClient.simulateContract({
+      address: CONTRACT_ADDRESS, abi: CONTRACT_ABI as Abi, functionName, args, account: from,
+    })
+    return { refused: false, error: 'Call unexpectedly succeeded' }
+  } catch (err: unknown) {
+    if (err instanceof BaseError) {
+      const revert = err.walk(e => e instanceof ContractFunctionRevertedError)
+      if (revert instanceof ContractFunctionRevertedError) {
+        return { refused: true, error: revert.data?.errorName ?? revert.signature ?? 'Reverted' }
+      }
+    }
+    // Not a revert (RPC/network failure): surface it rather than score it
+    throw err
+  }
+}
+
+const wrongHash = keccak256(toBytes('definitely not the right content'))
+const payload = toHex(toBytes('the actual deliverable'))
 
 // ── Attack definitions ─────────────────────────────────────────────
-
-type AttackResult = { refused: boolean; error: string; raw?: string }
 
 interface Attack {
   id: string
   label: string
   description: string
-  run: (caller: `0x${string}`) => Promise<AttackResult>
-}
-
-async function simulate(caller: `0x${string}`, functionName: string, args: unknown[]): Promise<AttackResult> {
-  try {
-    const data = encodeFunctionData({ abi: CONTRACT_ABI as Abi, functionName, args })
-    const result = await publicClient.call({ to: CONTRACT_ADDRESS, data, account: caller })
-    // If call succeeded (no revert), decode result
-    try {
-      decodeFunctionResult({ abi: CONTRACT_ABI as Abi, functionName, data: result.data ?? '0x' })
-    } catch { /* ignore decode errors on success */ }
-    return { refused: false, error: 'Call unexpectedly succeeded', raw: result.data }
-  } catch (err: unknown) {
-    // eth_call revert — extract revert data
-    const msg = (err as { message?: string })?.message ?? ''
-    // viem wraps revert data in the error message
-    const dataMatch = msg.match(/data["\s:=]+"(0x[0-9a-fA-F]+)"/i) ??
-                      msg.match(/0x[0-9a-fA-F]{8,}/g)
-    const revertData = (dataMatch?.[0] ?? dataMatch?.[0] ?? '').replace(/^.*?(0x[0-9a-fA-F]{8,}).*$/, '$1') as `0x${string}`
-    if (revertData && revertData.length >= 10) {
-      const name = decodeRevert(revertData)
-      return { refused: true, error: name, raw: revertData }
-    }
-    // Generic revert
-    if (msg.includes('revert') || msg.includes('Reverted') || msg.includes('execution reverted')) {
-      // Try to parse a selector out of the message directly
-      const selMatch = msg.match(/0x([0-9a-fA-F]{8})[0-9a-fA-F]*/)?.[1]
-      if (selMatch) {
-        const sel = `0x${selMatch}`
-        const name = decodeRevert(sel)
-        return { refused: true, error: name }
-      }
-      return { refused: true, error: 'Reverted (no data)' }
-    }
-    return { refused: false, error: msg.slice(0, 80) }
-  }
-}
-
-// Produce a valid deliverable hash for a "wrong" payload
-function wrongHash(): `0x${string}` {
-  return keccak256(toBytes('definitely not the right content'))
-}
-
-// Encode a bytes argument for optParams
-function encodeOptParams(text: string): `0x${string}` {
-  return encodeAbiParameters(parseAbiParameters('bytes'), [toHex(toBytes(text))])
+  run: (t: Targets) => Promise<AttackResult>
 }
 
 const ATTACKS: Attack[] = [
   {
     id: 'stranger-complete',
     label: 'Pay yourself (stranger)',
-    description: 'Call complete() on a job as a random wallet that is not the evaluator.',
-    run: async (caller) => simulate(caller, 'complete', [DUMMY_JOB_ID, '0x' + '00'.repeat(32), encodeOptParams('approve')]),
+    description: 'Call complete() on a job from a random wallet that is not the evaluator.',
+    run: (t) => simulate(STRANGER, 'complete', [t.settled.id, ZERO_REASON, '0x']),
   },
   {
     id: 'provider-reject-own',
     label: 'Provider rejects own job',
-    description: 'Call reject() from the provider address — only the evaluator may reject.',
-    run: async (caller) => simulate(caller, 'reject', [DUMMY_JOB_ID, '0x' + '00'.repeat(32), encodeOptParams('reject')]),
+    description: 'Call reject() from the provider address. Only the evaluator may reject.',
+    run: (t) => simulate(t.settled.provider, 'reject', [t.settled.id, ZERO_REASON, '0x']),
   },
   {
     id: 'client-complete',
-    label: 'Client completes own job',
-    description: 'Call complete() from the client — only the evaluator may approve.',
-    run: async (caller) => simulate(caller, 'complete', [DUMMY_JOB_ID, '0x' + '00'.repeat(32), encodeOptParams('approve')]),
+    label: 'Client approves own job',
+    description: 'Call complete() from the client. Only the evaluator may approve.',
+    run: (t) => simulate(t.settled.client, 'complete', [t.settled.id, ZERO_REASON, '0x']),
   },
   {
-    id: 'hash-mismatch',
-    label: 'Submit with wrong hash',
-    description: 'Call submit() with a deliverable hash that doesn\'t match the optParams content.',
-    run: async (caller) => simulate(caller, 'submit', [DUMMY_JOB_ID, wrongHash(), encodeOptParams('the actual deliverable text that wont match')]),
+    id: 'hijack-submit',
+    label: 'Steal the job',
+    description: 'Call submit() from a wallet that is not the assigned provider.',
+    run: (t) => simulate(STRANGER, 'submit', [t.settled.id, wrongHash, payload]),
   },
   {
-    id: 'submit-expired',
-    label: 'Submit after expiry',
-    description: 'Call submit() on a non-existent (expired) job.',
-    run: async (caller) => simulate(caller, 'submit', [DUMMY_JOB_ID, wrongHash(), '0x']),
+    id: 'resubmit-settled',
+    label: 'Swap the deliverable after payout',
+    description: 'The provider calls submit() again on a job that is already paid.',
+    run: (t) => simulate(t.settled.provider, 'submit', [t.settled.id, keccak256(payload), payload]),
   },
   {
-    id: 'early-refund',
-    label: 'Claim refund before expiry',
-    description: 'Call claimRefund() on a job before its expiry timestamp.',
-    run: async (caller) => simulate(caller, 'claimRefund', [DUMMY_JOB_ID]),
+    id: 'refund-paid',
+    label: 'Refund a paid job',
+    description: 'The client calls claimRefund() on a job whose USDC already went to the provider.',
+    run: (t) => simulate(t.settled.client, 'claimRefund', [t.settled.id]),
   },
   {
     id: 'double-complete',
-    label: 'Double-complete a settled job',
-    description: 'Call complete() twice — once it\'s Completed, the second call must fail.',
-    run: async (caller) => simulate(caller, 'complete', [DUMMY_JOB_ID, '0x' + '00'.repeat(32), '0x']),
+    label: 'Double-pay a settled job',
+    description: 'The evaluator calls complete() a second time on a Completed job.',
+    run: (t) => simulate(t.settled.evaluator, 'complete', [t.settled.id, ZERO_REASON, '0x']),
   },
   {
     id: 'fund-strangers-job',
     label: "Fund someone else's job",
-    description: 'Call fund() on a job you didn\'t create — only the client may fund.',
-    run: async (caller) => simulate(caller, 'fund', [DUMMY_JOB_ID, 1_000_000n]),
+    description: "Call fund() on a job you didn't create. Only the client may fund.",
+    run: (t) => simulate(STRANGER, 'fund', [(t.rejected ?? t.settled).id, '0x']),
   },
 ]
 
 // ── Single attack row ─────────────────────────────────────────────
 
-interface AttackState { status: 'idle' | 'running' | 'refused' | 'passed'; error: string }
+interface AttackState { status: 'idle' | 'running' | 'refused' | 'passed' | 'error'; error: string }
 
 function AttackRow({
   attack,
@@ -198,6 +173,11 @@ function AttackRow({
               Passed through!
             </span>
           )}
+          {state.status === 'error' && (
+            <span className="mono text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(245,158,11,0.12)', color: 'var(--amber)' }}>
+              {state.error}
+            </span>
+          )}
         </div>
         <p className="text-xs" style={{ color: 'var(--ink-2)' }}>{attack.description}</p>
       </div>
@@ -222,18 +202,15 @@ function AttackRow({
 // ── Page ──────────────────────────────────────────────────────────
 
 export function BreakItPage() {
-  const { address, isConnected } = useAccount()
   const [states, setStates] = useState<Record<string, AttackState>>({})
 
   const refused = Object.values(states).filter(s => s.status === 'refused').length
-  const ran = Object.values(states).filter(s => s.status !== 'idle').length
-  const allRefused = ran === ATTACKS.length && refused === ATTACKS.length
+  const allRefused = refused === ATTACKS.length
 
   async function runAttack(attack: Attack) {
-    const caller = address ?? ('0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
     setStates(prev => ({ ...prev, [attack.id]: { status: 'running', error: '' } }))
     try {
-      const result = await attack.run(caller)
+      const result = await attack.run(await getTargets())
       setStates(prev => ({
         ...prev,
         [attack.id]: {
@@ -242,7 +219,7 @@ export function BreakItPage() {
         },
       }))
     } catch {
-      setStates(prev => ({ ...prev, [attack.id]: { status: 'idle', error: '' } }))
+      setStates(prev => ({ ...prev, [attack.id]: { status: 'error', error: 'Network error, try again' } }))
     }
   }
 
@@ -266,14 +243,9 @@ export function BreakItPage() {
             </div>
           </div>
           <p className="text-sm" style={{ color: 'var(--ink-2)' }}>
-            Each button fires a read-only <span className="mono" style={{ color: 'var(--muted)' }}>eth_call</span> simulation — no wallet signature, no gas.
-            Every one should be refused by the contract. A green badge means the contract caught it.
+            Each button replays a real attack against settled jobs on the live contract as a read-only <span className="mono" style={{ color: 'var(--muted)' }}>eth_call</span>. No wallet, no signature, no gas.
+            Every one should be refused by the contract. A green badge shows the exact error it reverted with.
           </p>
-          {!isConnected && (
-            <div className="mt-3 rounded-xl px-4 py-2.5 text-xs" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-              Connect a wallet to simulate from your address — or leave disconnected to simulate from a generic address.
-            </div>
-          )}
         </div>
 
         {/* Score bar */}
@@ -297,7 +269,7 @@ export function BreakItPage() {
             className="flex-shrink-0 px-4 py-2 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-[0.99]"
             style={{ background: 'var(--red)', color: 'white' }}
           >
-            Run all 8
+            Run all {ATTACKS.length}
           </button>
         </div>
 
@@ -316,7 +288,7 @@ export function BreakItPage() {
 
         {allRefused && (
           <div className="mt-6 rounded-xl px-5 py-4 text-center" style={{ background: 'rgba(34,213,100,0.08)', border: '1px solid rgba(34,213,100,0.25)' }}>
-            <div className="text-lg font-bold mb-1" style={{ color: 'var(--green)' }}>8/8 refused</div>
+            <div className="text-lg font-bold mb-1" style={{ color: 'var(--green)' }}>{ATTACKS.length}/{ATTACKS.length} refused</div>
             <p className="text-sm" style={{ color: 'var(--ink-2)' }}>
               Every attack was caught. The contract enforced its rules without a single signed transaction.
             </p>
@@ -324,7 +296,7 @@ export function BreakItPage() {
         )}
 
         <p className="text-xs mt-6 text-center" style={{ color: 'var(--muted)' }}>
-          All simulations use <span className="mono">eth_call</span> via the Arc Testnet RPC. Nothing is broadcast or signed.
+          All simulations use <span className="mono">eth_call</span> via the {NETWORK.label} RPC. Nothing is broadcast or signed.
         </p>
       </ChainGuard>
     </main>

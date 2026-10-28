@@ -453,6 +453,52 @@ export function JobPage() {
           </div>
         )}
 
+        {/* ── Submitted work hero ── show prominently when job is awaiting review */}
+        {job.status === JobStatus.Submitted && deliverableText && (
+          <div className="mb-6 rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.04)' }}>
+            {/* Banner */}
+            <div className="flex items-center gap-3 px-5 py-3" style={{ background: 'rgba(245,158,11,0.1)', borderBottom: '1px solid rgba(245,158,11,0.2)' }}>
+              <div className="w-2 h-2 rounded-full animate-live flex-shrink-0" style={{ background: 'var(--amber)' }} />
+              <span className="text-sm font-semibold" style={{ color: 'var(--amber)' }}>Agent submitted work</span>
+              <span className="ml-auto text-xs" style={{ color: 'var(--muted)' }}>Sentinel reviewing</span>
+            </div>
+            {/* Content */}
+            <div className="px-5 py-4">
+              <p className="text-sm whitespace-pre-wrap text-pretty leading-relaxed" style={{ color: 'var(--ink)', fontFamily: 'DM Sans, sans-serif' }}>
+                {displayedDeliverable}
+                {typewriterActive && displayedDeliverable.length < deliverableText.length && (
+                  <span className="inline-block w-0.5 h-4 ml-px align-middle animate-pulse" style={{ background: 'var(--amber)' }} />
+                )}
+              </p>
+            </div>
+            {/* Footer */}
+            <div className="flex items-center justify-between px-5 py-3 flex-wrap gap-2" style={{ borderTop: '1px solid rgba(245,158,11,0.15)' }}>
+              <div className="flex items-center gap-2">
+                {verifyState === 'idle' && (
+                  <button
+                    onClick={verifyDeliverable}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 transition-opacity"
+                    style={{ background: 'var(--surface-strong)', color: 'var(--ink-2)' }}
+                  >
+                    Verify hash onchain
+                  </button>
+                )}
+                {verifyState === 'ok' && (
+                  <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--green)' }}>
+                    <CheckCircle size={12} /> Hash verified
+                  </span>
+                )}
+                {verifyState === 'fail' && (
+                  <span className="text-xs font-medium" style={{ color: 'var(--red)' }}>Hash mismatch</span>
+                )}
+              </div>
+              <span className="mono text-xs" style={{ color: 'var(--muted)' }}>
+                keccak256: {fmtHash(job.deliverable)}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Timeline + details grid */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
           {/* Timeline */}
@@ -513,8 +559,8 @@ export function JobPage() {
               ))}
             </div>
 
-            {/* Deliverable — typewriter reveal */}
-            {deliverableText && (
+            {/* Deliverable — only in sidebar when NOT in Submitted state (hero card above handles that) */}
+            {deliverableText && job.status !== JobStatus.Submitted && (
               <div className="rounded-xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs uppercase tracking-widest" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>Deliverable</span>

@@ -56,6 +56,7 @@ interface FeedItem {
   txHash: string
   isNew?: boolean
   isTerminal: boolean  // Completed or Rejected (for real-activity filter)
+  deliverable?: string // decoded optParams for JobSubmitted rows
 }
 
 function buildFeedItems(logs: CachedLog[], head: bigint, nowSec: number): FeedItem[] {
@@ -100,6 +101,17 @@ function buildFeedItems(logs: CachedLog[], head: bigint, nowSec: number): FeedIt
 
     const isTerminal = log.eventName === 'JobCompleted' || log.eventName === 'JobRejected'
 
+    // Decode submitted deliverable for preview
+    let deliverable: string | undefined
+    if (log.eventName === 'JobSubmitted') {
+      const raw = args.optParams as `0x${string}` | undefined
+      if (raw && raw !== '0x') {
+        try {
+          deliverable = new TextDecoder().decode(Buffer.from(raw.slice(2), 'hex')).slice(0, 160)
+        } catch { /* ignore */ }
+      }
+    }
+
     items.push({
       key,
       jobId,
@@ -110,6 +122,7 @@ function buildFeedItems(logs: CachedLog[], head: bigint, nowSec: number): FeedIt
       ts,
       txHash,
       isTerminal,
+      deliverable,
     })
   }
   return items
@@ -340,33 +353,47 @@ export function LivePage() {
             {displayFeed.slice(0, 50).map(item => (
               <div
                 key={item.key}
-                className={`flex items-center gap-3 px-4 py-3 hover:bg-[var(--surface)] cursor-pointer transition-colors ${item.isNew ? 'animate-slide-in' : ''}`}
-                onClick={() => { void navigate(`/job/${item.jobId.toString()}`) }}
+                className={`px-4 py-3 hover:bg-[var(--surface)] cursor-pointer transition-colors ${item.isNew ? 'animate-slide-in' : ''}`}
+                onClick={() => { void navigate(`/dashboard/job/${item.jobId.toString()}`) }}
               >
-                <StatusPill status={statusFromEvent(item.eventName)} />
-                <span className="hidden sm:block text-xs mono flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '80px' }}>
-                  {item.agent}
-                </span>
-                <span className="flex-1 text-sm truncate" style={{ color: 'var(--ink-2)' }}>
-                  {item.task}
-                </span>
-                <span className="mono text-xs flex-shrink-0" style={{ color: item.eventName === 'JobCompleted' ? 'var(--green)' : (item.eventName === 'JobRejected' || item.eventName === 'Refunded') ? 'var(--red)' : 'var(--amber)' }}>
-                  {item.budget > 0n ? `$${formatUsdc(item.budget)}` : '—'}
-                </span>
-                <span className="hidden sm:block text-xs flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '56px', textAlign: 'right' }}>
-                  {fmtAge(Math.floor(item.ts))}
-                </span>
-                {item.txHash && (
-                  <a
-                    href={txUrl(item.txHash)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {/* Main row */}
+                <div className="flex items-center gap-3">
+                  <StatusPill status={statusFromEvent(item.eventName)} />
+                  <span className="hidden sm:block text-xs mono flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '80px' }}>
+                    {item.agent}
+                  </span>
+                  <span className="flex-1 text-sm truncate" style={{ color: 'var(--ink-2)' }}>
+                    {item.task}
+                  </span>
+                  <span className="mono text-xs flex-shrink-0" style={{ color: item.eventName === 'JobCompleted' ? 'var(--green)' : (item.eventName === 'JobRejected' || item.eventName === 'Refunded') ? 'var(--red)' : 'var(--amber)' }}>
+                    {item.budget > 0n ? `$${formatUsdc(item.budget)}` : '—'}
+                  </span>
+                  <span className="hidden sm:block text-xs flex-shrink-0" style={{ color: 'var(--muted)', minWidth: '56px', textAlign: 'right' }}>
+                    {fmtAge(Math.floor(item.ts))}
+                  </span>
+                  {item.txHash && (
+                    <a
+                      href={txUrl(item.txHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="flex-shrink-0 hover:opacity-80"
+                      style={{ color: 'var(--muted)' }}
+                    >
+                      <ExternalLink size={12} />
+                    </a>
+                  )}
+                </div>
+                {/* Deliverable preview for Submitted rows */}
+                {item.deliverable && (
+                  <div
+                    className="mt-2 ml-0 sm:ml-24 px-3 py-2 rounded-lg text-xs italic"
+                    style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)', color: 'var(--ink-2)', lineHeight: '1.5' }}
                     onClick={e => e.stopPropagation()}
-                    className="flex-shrink-0 hover:opacity-80"
-                    style={{ color: 'var(--muted)' }}
                   >
-                    <ExternalLink size={12} />
-                  </a>
+                    <span style={{ color: 'var(--amber)', fontStyle: 'normal', fontWeight: 600, marginRight: '6px' }}>Submitted:</span>
+                    {item.deliverable}{item.deliverable.length >= 160 ? '…' : ''}
+                  </div>
                 )}
               </div>
             ))}
@@ -377,7 +404,7 @@ export function LivePage() {
       {/* CTA */}
       <div className="mt-8 text-center">
         <button
-          onClick={() => { void navigate('/hire') }}
+          onClick={() => { void navigate('/dashboard/hire') }}
           className="px-6 py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95"
           style={{ background: 'var(--green)', color: '#09090b' }}
         >
