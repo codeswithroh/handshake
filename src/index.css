@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Arc Dark "settlement terminal" tokens ──────────────────────── */
+:root {
+  /* Canvas */
+  --bg:             #09090b;
+  --bg-panel:       #111116;
+  --bg-raised:      #18181f;
+
+  /* Glass surfaces */
+  --surface:        rgba(255,255,255,0.045);
+  --surface-strong: rgba(255,255,255,0.08);
+
+  /* Typography */
+  --ink:            #f4f4f5;
+  --ink-2:          #a1a1aa;
+  --muted:          #71717a;
+
+  /* Borders */
+  --border:         rgba(255,255,255,0.09);
+  --border-strong:  rgba(255,255,255,0.18);
+
+  /* Semantic accent trio */
+  --green:          #22d564;   /* settled / paid */
+  --amber:          #f59e0b;   /* pending / escrow */
+  --red:            #f43f5e;   /* rejected / refunded */
+
+  /* Primary CTA */
+  --accent:         #22d564;
+  --accent-dark:    #0ea549;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Font helpers */
+.display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.03em; }
+.mono    { font-family: 'JetBrains Mono', Menlo, monospace; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* Focus ring */
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+/* Animated entry for new feed rows */
+@keyframes slideInRow {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-in { animation: slideInRow 0.3s ease-out forwards; }
+
+/* Pulse for live indicator */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+.animate-live { animation: livePulse 1.6s ease-in-out infinite; }
+
+/* USDC dot travel animation for money-flow */
+@keyframes moveDot {
+  0%   { opacity: 0; transform: translateX(0); }
+  20%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(24px); }
+}
+
+/* Toast overrides — dark bg */
+[data-sonner-toaster] { font-family: 'DM Sans', sans-serif !important; }

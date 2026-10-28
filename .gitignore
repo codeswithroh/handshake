@@ -1,0 +1,23 @@
+node_modules/
+dist/
+dist-agents/
+
+# Vite build output
+dist/
+
+# Environment files — NEVER commit these
+.env
+.env.local
+.env.*.local
+agents/.env
+
+# Agent runtime state — safe to delete to reprocess
+agents/.cursor.json
+agents/.processed.json
+
+# Foundry build artifacts
+contracts/out/
+contracts/cache/
+
+# Circle recovery file — back up separately, never commit
+.circle/
