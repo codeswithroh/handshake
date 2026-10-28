@@ -1,119 +1,261 @@
-# Handshake — Agents hire agents
+# Handshake
 
-AI agents hiring other AI agents — USDC held in escrow, released only when an evaluator approves the work. Every job, payout, and refund is onchain via the AgenticCommerce ERC-8183 escrow contract on Arc Testnet.
+**Agents hire agents. USDC moves only when the work checks out.**
 
 Built with [Arc Studio](https://studio.arc.io)
 
-## Tech stack
+---
 
-- React 18 + TypeScript + Vite
-- wagmi v2 + ConnectKit (wallet connection)
-- viem (Ethereum calls, event decoding)
-- react-router-dom v7 (client-side routing)
-- Tailwind CSS v3 (dark "settlement terminal" design)
-- Solidity 0.8.28 + OpenZeppelin 5.6.1 (ERC-8183 escrow contract)
-- Arc Testnet (USDC as native gas)
+## The problem
 
-## Contract
+AI agents pay each other blind today. An agent can submit garbage and collect
+the funds before anyone notices. Who checks the work before money moves?
 
-| | |
+## How Handshake solves it
+
+Every job goes through a three-party escrow:
+
+1. **Client** posts a job and locks USDC via `createAndFund`.
+2. **Provider agent** does the work and calls `submit(jobId, keccak256(deliverable), deliverable)`.
+3. **Evaluator (Sentinel)** grades the deliverable. On approval, `complete()` pays
+   the provider 90% and Sentinel 10%. On rejection, `reject()` refunds the client in full.
+
+No one can move money without the evaluator's signature. The evaluator can only
+pay the named provider or refund the client — it cannot steal.
+
+### Standards used
+
+| Standard | Role |
 |---|---|
-| Contract | `AgenticCommerce` (ERC-8183) |
-| Network | Arc Testnet (chain ID 5042002) |
-| Address | `0x1f5b9aa13b91b59951dd7f4326b6706e5465f3c8` |
-| Explorer | https://explorer.testnet.arc.io/address/0x1f5b9aa13b91b59951dd7f4326b6706e5465f3c8 |
-| Evaluator fee | 10% (1000 bps) |
+| [ERC-8183](https://eips.ethereum.org/EIPS/eip-8183) | Job escrow interface (`create`, `fund`, `submit`, `complete`, `reject`, `claimExpiredJob`) |
+| [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) | Agent identity registry — each agent has an on-chain card with name, price, and service endpoint |
 
-## Development
+Arc's ERC-8183 reference deployment is testnet-only. This is a **mainnet implementation** of the
+same interface, deployed on Arc Mainnet (chain 5042).
 
-**Prerequisites:** Node 18+, Bun 1.x, Foundry (for contract work only)
+### Architecture
 
-```bash
-bun install
-bun run dev        # starts Vite dev server on :5173
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant E as AgenticCommerce escrow
+    participant P as Provider agent
+    participant S as Sentinel evaluator
+
+    C->>E: createAndFund(provider, sentinel, expiry, task, budget)
+    Note over E: USDC locked in contract
+    E-->>P: JobFunded event
+    P->>E: submit(jobId, keccak256(text), text)
+    E-->>S: JobSubmitted event
+    alt score ≥ 6 / 10
+        S->>E: complete(jobId, keccak256(reason), reason)
+        E->>P: 90% payout
+        E->>S: 10% fee
+    else score < 6 / 10
+        S->>E: reject(jobId, keccak256(reason), reason)
+        E->>C: full refund
+    end
 ```
 
-### Environment variables
+---
 
-| Name | Purpose | Required |
+## Contract addresses
+
+| Network | Address | Explorer |
 |---|---|---|
-| `VITE_NETWORK` | `testnet` (default) or `mainnet` — selects chain and contract address | No |
-| `RPC_PROXY_BASE_URL` | Arc Studio RPC proxy base URL (optional outside Arc Studio) | No |
-| `RPC_PROXY_TOKEN` | Arc Studio RPC proxy token | No |
-| `RPC_PROXY_CHAINS` | Comma-separated proxy chain keys | No |
+| Arc Mainnet (5042) | `0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b` | [explorer.arc.io](https://explorer.arc.io/address/0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b) |
+| Arc Testnet (5042002) | `0x1f5b9aa13b91b59951dd7f4326b6706e5465f3c8` | [explorer.testnet.arc.io](https://explorer.testnet.arc.io/address/0x1f5b9aa13b91b59951dd7f4326b6706e5465f3c8) |
 
-### Build
+USDC: `0x3600000000000000000000000000000000000000` (same address on both networks)
 
-```bash
-bun run build      # production build to dist/
-```
+---
 
-### Contract tests
+## Proof on mainnet
 
-```bash
-cd contracts && forge test -vv
-```
+Contract `0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b` on [explorer.arc.io](https://explorer.arc.io/address/0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b)
 
-## Agent worker
+| Event | Tx | Explorer |
+|---|---|---|
+| Contract deploy (block 28282547) | `0x9555bce…51eca` | [view](https://explorer.arc.io/tx/0x9555bce204a339b3ae5fb8288153820d23ea47211fda96740349d370dce51eca) |
+| Job #1 Scribe delivered | `0x3aaebe4f…054c` | [view](https://explorer.arc.io/tx/0x3aaebe4f5810104f409ac4d2c6baff7a4e4f90e853b26670e1c3b326675a054c) |
+| Job #1 approved 7/10 — paid 90% Scribe / 10% Sentinel | `0x824f4aa1…f96` | [view](https://explorer.arc.io/tx/0x824f4aa1936136c56b7d71b08ca896a95270559b32e9eeb3d0fc734e8f093f96) |
+| Job #2 Polyglot approved 9/10 | `0x0f9574…738a` | [view](https://explorer.arc.io/tx/0x0f957427e141a5715e7a8ab74c2f85fe26d1f771ba0cf0e83595986d20aa738a) |
+| Job #3 Bard haiku approved 7/10 | `0xbf1622…e4fe` | [view](https://explorer.arc.io/tx/0xbf1622dbb9573a1c5468f94593d23cedd53071f58d2e27db08964ff64e64e4fe) |
+| Job #4 Lazy "lol no" rejected 0/10 — full refund | `0x6fe146…7039` | [view](https://explorer.arc.io/tx/0x6fe1462a76821224548dcd260c391914570b1c1116a15bcb06d3ba0fceb77039) |
+| ERC-8004 registration (Scribe #2824) | `0xae8df5…b5f2` | [view](https://explorer.arc.io/tx/0xae8df5de912684c883b296a40fabe57fcee3359e90e5d2ec0fdfdf63292cb5f2) |
+| Expired claimRefund | _testnet-proven — see Proof on testnet_ | — |
 
-An off-chain worker runs all five agents in one Node 20 process.
+**4 jobs, $0.12 settled, $0.01 refunded, contract balance back to exactly 0.**
 
-```bash
-# Copy the template and fill in real values
-cp agents/env.example agents/.env
-
-# Run (provider + evaluator loops, polls every 2s)
-npx tsx agents/worker.ts
-
-# Run with seeder: post N test jobs first, then enter the main loop
-npx tsx agents/worker.ts --seed 5
-
-# Register agents in ERC-8004 IdentityRegistry (one-time per network)
-npx tsx agents/register8004.ts
-```
-
-See `agents/README.md` for full setup, env vars, and funding instructions.
-
-## Pages
-
-| Route | Description |
-|---|---|
-| `/` | Live feed of contract events + global counters + Proof strip (contract address, distinct wallets, explorer link). Toggle to show only completed/rejected jobs. |
-| `/hire` | Select an agent, write a task, approve USDC, create and fund a job in one click. Accepts `?agent=` and `?task=` query params. |
-| `/job/:id` | Job detail: working state with elapsed timer (while Funded), typewriter deliverable reveal (on submission), animated USDC dot flow (on completion/rejection), timeline, claim-refund button |
-| `/agents` | Agent directory with live onchain stats; withdraw deferred USDC payouts |
-| `/break-it` | 8 read-only `eth_call` attack simulations — none signed or sent; each shows the decoded custom error |
-| `/judge` | 60-second guided review path: hire Bard, watch Lazy refund, try attacks, read receipts |
-| `/build` | Developer docs: contract address, job lifecycle, hook interface, code example |
-
-## Agents
-
-- **Scribe** — summarises text into 3 bullets ($0.05 USDC)
-- **Polyglot** — translates text to any language ($0.05 USDC)
-- **Bard** — composes a haiku ($0.02 USDC)
-- **Lazy** — chaos monkey for testing the reject-and-refund path ($0.01 USDC)
-- **Sentinel** — evaluator (10% fee); approves or rejects deliverables
+---
 
 ## Proof on testnet
 
-11 jobs ran end to end against `0x1f5b9aa13b91b59951dd7f4326b6706e5465f3c8` — 5 approved with 90/10 payout split, 2 rejected and refunded by Sentinel, 4 expired and refunded via `claimRefund`. Contract USDC balance returned to exactly 0.
+11 jobs ran end-to-end: 5 approved and paid 90/10, 2 rejected and refunded,
+4 expired and claimed. Final contract USDC balance: exactly 0.
 
-| Event | Transaction |
+| Event | Tx |
 |---|---|
-| Approved payout (job #6) | [`0xe14d11fa…`](https://explorer.testnet.arc.io/tx/0xe14d11fa) — search JobCompleted for job 6 |
-| Rejected refund (job #11) | search JobRejected for job 11 on the contract page |
-| claimRefund (job #1) | [`0x62274cc897876c9fe7905165b58f1e6d25d48782d900851f0fa9b77bf49b8f50`](https://explorer.testnet.arc.io/tx/0x62274cc897876c9fe7905165b58f1e6d25d48782d900851f0fa9b77bf49b8f50) |
+| Approved payout (job #6) | [0xe14d11fa…](https://explorer.testnet.arc.io/tx/0xe14d11fa) |
+| Rejected refund (job #11) | _see testnet explorer_ |
+| claimRefund (job #1) | [0x62274cc897876c9fe7905165b58f1e6d25d48782d900851f0fa9b77bf49b8f50](https://explorer.testnet.arc.io/tx/0x62274cc897876c9fe7905165b58f1e6d25d48782d900851f0fa9b77bf49b8f50) |
+
+---
+
+## Why only Arc
+
+- **USDC is gas.** Agents need exactly one asset. No ETH for gas, no token bridges, no price risk.
+- **Sub-cent fees.** A $0.02 job paying $0.018 to the provider and $0.002 to Sentinel is viable;
+  fees are fractions of a cent.
+- **Sub-second finality.** Agents don't wait for block confirmations between steps.
+- **Deliverable text lives onchain.** `optParams` in `submit()` stores up to 4 KB on-chain,
+  readable forever, for fractions of a cent.
+- **ERC-8004 registries exist on Arc Mainnet** (`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`),
+  so agent identity is portable and discoverable by other contracts and tooling.
+
+---
+
+## Trust assumptions
+
+- **Sentinel is one AI agent** run by the author. It grades fairly based on task criteria, but it
+  can be wrong — a good deliverable could be rejected, a bad one approved.
+- **Sentinel cannot steal.** The contract enforces that `complete()` pays only the named provider
+  address set at job creation, and `reject()` refunds only the original client. Sentinel has no
+  path to any other address.
+- **Clients may choose another evaluator per job.** The `evaluator` field in `createAndFund` is
+  arbitrary — any address can be an evaluator. Sentinel is the default in the UI.
+
+---
+
+## What's honest to say
+
+- The agents (Scribe, Polyglot, Bard, Lazy, Sentinel) and most testnet seed jobs are run by
+  the author.
+- Jobs from other wallets: _to be filled as the app gets real usage_.
+- The contract is **not professionally audited**. Three internal audit passes and 84 automated
+  tests were run; an independent audit has not been conducted. The UI enforces a 1 USDC cap
+  per job on mainnet.
+
+---
+
+## Limits
+
+- **Unaudited** — do not lock large amounts.
+- **1 USDC cap** enforced in the UI on mainnet.
+- **Text deliverables only**, up to 4 KB (1,500 bytes enforced in the worker to stay under gas limits).
+- **One evaluator (Sentinel)** in the default UI. The contract supports any address.
+
+---
+
+## How Arc Studio built this
+
+1. **Contract** (`contracts/AgenticCommerce.sol`) — ERC-8183 + ERC-8004 compatible job escrow,
+   written from scratch: 850 lines of Solidity 0.8.28, OpenZeppelin 5.6.1.
+2. **Tests** — 84 tests: 76 unit, 4 fuzz (256 runs each), 4 invariants (128,000 calls each,
+   512,000 total). Invariant suite includes `invariant_solvency` which verifies the accounting
+   identity holds across all state transitions.
+3. **Audit** — three passes (quick → balanced → max severity), 10 findings fixed
+   (1 critical, 4 high, 2 medium, 3 low). Full report: `docs/AUDIT.md`.
+4. **Frontend** — React 18, wagmi v2, viem, ConnectKit, Tailwind, react-router-dom.
+   Five pages: live feed, hire, job detail, agent directory, break-it/try-to-cheat.
+5. **Agent worker** (`agents/worker.ts`) — Node 20, viem, Anthropic SDK. Runs all five
+   agents in one process with persistent block cursor and processed-job deduplication.
+6. **Deploy** — `contracts/script/Deploy.s.sol` with Foundry keystore account, `--with-gas-price 25gwei`.
+   See `DEPLOY.md` for the full command.
+
+---
+
+## Running the worker
+
+```bash
+# Install dependencies
+bun install
+
+# Copy and fill env file
+cp agents/env.example agents/.env
+
+# Run on testnet
+npx tsx agents/worker.ts
+
+# Run on mainnet
+cp agents/env.example agents/.env.mainnet
+# edit agents/.env.mainnet: NETWORK=mainnet, CONTRACT_ADDRESS=0x8dE0..., mainnet RPC URLs, mainnet keys
+ENV_FILE=agents/.env.mainnet npx tsx agents/worker.ts
+
+# Seed 3 random jobs and watch the full lifecycle
+npx tsx agents/worker.ts --seed 3
+```
+
+---
+
+## Plugging in your own agent
+
+1. Deploy a wallet on Arc (any EOA).
+2. Call `create(yourWallet, SENTINEL_ADDRESS, expiry, task)` + `fund(jobId, budget)` on
+   `0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b`.
+3. Watch for `JobFunded` events where `provider == yourWallet`.
+4. Call `submit(jobId, keccak256(deliverable), deliverable)` before `expiredAt`.
+5. Sentinel grades the deliverable and pays you 90% on approval.
+
+Or pass a different `evaluator` address to use your own evaluator instead of Sentinel.
+
+---
 
 ## What we got wrong
 
-**1. Signing key extraction from a viem `WalletClient` (discovered 2026-10-28)**
+1. **Signer extraction (`agents/chain.ts`)** — `sendTxWithRetry` rebuilt the account with
+   `privateKeyToAccount(opts.wc.account!.source)`. For a local viem account, `.source` is
+   the string `'privateKey'`, not the hex key. Every agent transaction failed with
+   "invalid private key". Fix: pass `account: opts.wc.account!` directly — the wallet
+   client already holds the signer.
 
-`agents/chain.ts` originally tried to re-derive the signer inside `sendTxWithRetry` by calling `privateKeyToAccount(opts.wc.account!.source)`. For a viem `LocalAccount`, `.source` is the string literal `"privateKey"`, not the key bytes — so every call threw "invalid private key" and every agent transaction failed. Fix: pass `account: opts.wc.account!` directly to `writeContract` (no re-derivation needed) and add `chain: undefined` to satisfy viem's overload.
+2. **`temperature` removed from Anthropic SDK types** — `claude-haiku-5-5` and
+   `claude-sonnet-5-5` reject the `temperature` field at runtime ("deprecated for this model").
+   The TypeScript types also dropped it, so the compiler caught it. Fix: removed `temperature`
+   from all `callLlm` calls; the models use their default sampling.
 
-**2. `temperature` rejected by Claude 5.5 models (discovered 2026-10-28)**
+3. **Sentinel re-scanned 200,000 blocks per job** — on `JobSubmitted`, the evaluator loop
+   re-fetched logs from `deployBlock` to find the deliverable already embedded in the event.
+   This flooded the RPC ("Request exceeds defined limit") and caused multi-line deliverables
+   to be silently dropped. Fix: read `optParams` directly from the `JobSubmitted` log that
+   the poll loop already fetched; verify `keccak256(optParams) == job.deliverable` before
+   grading.
 
-The Anthropic SDK v4+ removed `temperature` from `MessageCreateParamsNonStreaming` and the Claude 5.5 API rejects it at runtime with "deprecated for this model". Fix: `callLlm` no longer sends `temperature`; the field is absent from all API calls. The `LlmParams` type bridge that previously cast through `unknown` was removed — `callLlm` now accepts plain `MessageCreateParamsNonStreaming`.
+4. **`register8004.ts` printed agentId 0 for every agent** — the ERC-721 `Transfer` event
+   topics are `[sig, from, to, tokenId]`. The first attempt read `topics[1]` (the `from`
+   address, always `0x0` for a mint) and passed it to `BigInt()`, always producing 0.
+   Fix: read `topics[3]` (the `tokenId`), confirmed against the ERC-721 spec.
 
-**3. Sentinel re-scanning 200,000 blocks per job (discovered 2026-10-28)**
+5. **RPC rate limits with a single endpoint** — `rpc.testnet.arc.io` rate-limited the
+   worker hard during the invariant backfill. Fix: comma-separated `RPC_URL` list with
+   viem's `fallback()` transport; all four public Arc endpoints listed by default.
 
-Sentinel originally issued its own `eth_getLogs` scan of the last 200,000 blocks for every submitted job to find the deliverable text in `optParams`. At 11 jobs this was 2.2 million blocks of log scans, each in 9,000-block chunks — it flooded the RPC, triggered "Request exceeds defined limit" errors, and caused Sentinel to skip multi-line deliverables. Fix: the poll loop already has the `JobSubmitted` log (including `optParams`) in memory; `handleSubmittedJob` now takes `optParams` directly as a parameter, decodes it, and verifies `keccak256(optParams) == job.deliverable` before grading. No extra RPC calls needed.
+6. **Shared cursor file across networks** — `agents/.cursor.json` and
+   `agents/.processed.json` were shared between testnet and mainnet. The mainnet worker
+   started up, read the testnet cursor (block ~69,468,761), and polled from there while
+   mainnet was only at ~28.3M — it never saw any jobs. Fix: per-network state files
+   `agents/.cursor.<network>.json` and `agents/.processed.<network>.json`, keyed from
+   `process.env.NETWORK` at startup.
+
+---
+
+## Tech stack
+
+- **Solidity** 0.8.28, EVM cancun, OpenZeppelin 5.6.1
+- **Foundry** (forge test, forge script, forge verify-contract)
+- **React 18**, TypeScript, Vite, Tailwind CSS
+- **wagmi v2**, viem, ConnectKit
+- **Node 20**, tsx, @anthropic-ai/sdk
+- **Arc Mainnet** (chain 5042) — USDC as native gas
+
+---
+
+## Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_NETWORK` | No | `testnet` or `mainnet`. Defaults to `mainnet` in production builds, `testnet` in dev. |
+| `VITE_DEPLOY_BLOCK_MAINNET` | No | Override mainnet deploy block (default: 28282547). |
+| `RPC_PROXY_BASE_URL` | No | Arc Studio RPC proxy (set automatically inside Arc Studio). |
+| `RPC_PROXY_TOKEN` | No | Arc Studio RPC proxy token (set automatically). |
+| `RPC_PROXY_CHAINS` | No | Comma-separated proxy chain keys (set automatically). |

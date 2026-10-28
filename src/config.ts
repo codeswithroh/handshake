@@ -6,7 +6,8 @@ import { http, createConfig, fallback } from 'wagmi'
 import { mainnet } from 'wagmi/chains'
 import { defineChain } from 'viem'
 import { injected } from 'wagmi/connectors'
-import { registerChain } from './tracing'
+// registerChain is a no-op stub in production; tracing module is dev-only.
+function registerChain(_chainId: number, _rpcUrl: string): void { /* no-op in prod */ }
 
 // ── Arc Testnet ────────────────────────────────────────────────────
 export const arcTestnet = defineChain({
@@ -49,24 +50,24 @@ const TESTNET_CONFIG: NetworkConfig = {
   deployBlock: 69223525n,
 }
 
-// Mainnet deploy block — required when VITE_NETWORK=mainnet.
-// Set VITE_DEPLOY_BLOCK_MAINNET in your .env before switching to mainnet.
-const _mainnetDeployBlock = import.meta.env.VITE_DEPLOY_BLOCK_MAINNET
-  ? BigInt(String(import.meta.env.VITE_DEPLOY_BLOCK_MAINNET))
-  : 0n
-
 const MAINNET_CONFIG: NetworkConfig = {
   chain: arcMainnet,
   chainId: 5042,
-  // Replace with deployed mainnet address when ready
-  contractAddress: '0x0000000000000000000000000000000000000000',
+  // AgenticCommerce deployed 2026-10-28, tx 0x9555bce204a339b3ae5fb8288153820d23ea47211fda96740349d370dce51eca
+  contractAddress: '0x8dE0bdFd2800b5dE98c295d64dD0B7490808611b',
   usdcAddress: '0x3600000000000000000000000000000000000000',
   explorerBase: 'https://explorer.arc.io',
   label: 'Arc',
-  deployBlock: _mainnetDeployBlock,
+  // Block at which AgenticCommerce was deployed on Arc Mainnet.
+  // Override with VITE_DEPLOY_BLOCK_MAINNET if redeployed.
+  deployBlock: import.meta.env.VITE_DEPLOY_BLOCK_MAINNET
+    ? BigInt(String(import.meta.env.VITE_DEPLOY_BLOCK_MAINNET))
+    : 28282547n,
 }
 
-const env = String(import.meta.env.VITE_NETWORK ?? 'testnet').toLowerCase()
+// Default to mainnet for production builds; testnet for dev (VITE_NETWORK overrides either way).
+const _envDefault = import.meta.env.PROD ? 'mainnet' : 'testnet'
+const env = String(import.meta.env.VITE_NETWORK ?? _envDefault).toLowerCase()
 export const NETWORK: NetworkConfig = env === 'mainnet' ? MAINNET_CONFIG : TESTNET_CONFIG
 
 // Register for trace labelling

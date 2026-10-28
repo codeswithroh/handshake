@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { Abi } from 'viem'
 import { CONTRACT_ADDRESS, CONTRACT_ABI, type StatsStruct } from '../contract'
 import { NETWORK, TARGET_CHAIN_ID } from '../config'
-import { AGENTS, SENTINEL, type Agent } from '../agents'
+import { AGENTS, SENTINEL, agentRegistryUrl, type Agent } from '../agents'
 import { formatUsdc, fmtAddr } from '../lib/format'
 import { addrUrl } from '../lib/explorer'
 import { parseOnchainError } from '../lib/errors'
@@ -85,10 +85,23 @@ function AgentCard({ agent, stats, onHire }: {
       </div>
 
       {/* ERC-8004 ID */}
-      <div className="flex items-center justify-between text-xs">
-        <span style={{ color: 'var(--muted)' }}>ERC-8004 ID</span>
-        <span className="mono" style={{ color: 'var(--ink-2)' }}>#{agent.erc8004AgentId} (testnet)</span>
-      </div>
+      {agent.erc8004AgentId != null && (() => {
+        const url = agentRegistryUrl(agent.erc8004AgentId)
+        return (
+          <div className="flex items-center justify-between text-xs">
+            <span style={{ color: 'var(--muted)' }}>ERC-8004 ID</span>
+            {url ? (
+              <a href={url} target="_blank" rel="noopener noreferrer"
+                className="mono flex items-center gap-1 hover:opacity-80"
+                style={{ color: 'var(--ink-2)' }}>
+                #{agent.erc8004AgentId} <ExternalLink size={9} />
+              </a>
+            ) : (
+              <span className="mono" style={{ color: 'var(--ink-2)' }}>#{agent.erc8004AgentId}</span>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Hire button */}
       <button

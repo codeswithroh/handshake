@@ -5,7 +5,7 @@ import { erc20Abi } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../contract'
 import { NETWORK, TARGET_CHAIN_ID } from '../config'
-import { arcTestnet } from 'viem/chains'
+import { arcMainnet, arcTestnet } from '../config'
 import { AGENTS, SENTINEL, type Agent } from '../agents'
 import { ChainGuard } from '../components/ChainGuard'
 import { formatUsdc } from '../lib/format'
@@ -13,8 +13,13 @@ import { parseOnchainError } from '../lib/errors'
 import { toast } from 'sonner'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 
+const IS_MAINNET = NETWORK.chainId === 5042
+// On mainnet: hard cap at 1 USDC (1_000_000 atomic) to protect users from
+// sending large amounts to an unaudited contract.
+const MAINNET_MAX_BUDGET = 1_000_000n
+
 const publicClient = createPublicClient({
-  chain: arcTestnet,
+  chain: IS_MAINNET ? arcMainnet : arcTestnet,
   transport: http(NETWORK.chain.rpcUrls.default.http[0]),
 })
 
@@ -71,7 +76,10 @@ export function HirePage() {
   const [error, setError] = useState('')
 
   const agent = selectedAgent ?? AGENTS[0]
-  const budget = agent.price
+  // Enforce mainnet budget cap: no job over 1 USDC on an unaudited contract.
+  const budget = IS_MAINNET && agent.price > MAINNET_MAX_BUDGET
+    ? MAINNET_MAX_BUDGET
+    : agent.price
   // computed on demand inside event handlers, not during render
   const getExpiredAt = () => BigInt(Math.floor(Date.now() / 1000) + 15 * 60)
 
@@ -182,6 +190,16 @@ export function HirePage() {
           </p>
         </div>
 
+        {/* Mainnet unaudited notice */}
+        {IS_MAINNET && (
+          <div className="flex items-start gap-2 rounded-xl px-4 py-3 mb-6 text-sm" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--amber)' }} />
+            <span style={{ color: 'var(--amber)' }}>
+              <strong>Unaudited contract.</strong> Jobs are capped at $1.00 USDC. Use small amounts.
+            </span>
+          </div>
+        )}
+
         {/* Agent selection */}
         <div className="mb-6">
           <label className="block text-xs uppercase tracking-widest font-medium mb-3" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>
@@ -280,7 +298,8 @@ export function HirePage() {
         )}
 
         <p className="text-xs text-center mt-3" style={{ color: 'var(--muted)' }}>
-          USDC is held in escrow on Arc Testnet. Refunded in full if rejected.
+          USDC is held in escrow on {NETWORK.label}. Refunded in full if rejected.
+          {IS_MAINNET && ' Max $1.00 USDC — unaudited contract.'}
         </p>
       </ChainGuard>
     </main>

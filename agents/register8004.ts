@@ -17,16 +17,20 @@ import { fileURLToPath } from 'node:url'
 import { type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
-  walletClient, publicClient, sendTxWithRetry,
+  walletClient, sendTxWithRetry,
   fmtAddr, fmtTx,
   getChain,
 } from './chain.js'
 import { IDENTITY_REGISTRY_ABI } from './abi.js'
 
-// ── Load agents/.env ───────────────────────────────────────────────
+// ── Load env file ──────────────────────────────────────────────────
+// Default: agents/.env  Override: ENV_FILE=agents/.env.mainnet npx tsx agents/register8004.ts
 
 const __dir = dirname(fileURLToPath(import.meta.url))
-const envPath = resolve(__dir, '.env')
+const _envFileArg = process.env.ENV_FILE
+const envPath = _envFileArg
+  ? resolve(process.cwd(), _envFileArg)
+  : resolve(__dir, '.env')
 if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf8').split('\n')) {
     const trimmed = line.trim()
@@ -37,6 +41,9 @@ if (existsSync(envPath)) {
     const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
     if (!(key in process.env)) process.env[key] = val
   }
+  console.log(`[register8004] env: ${envPath}`)
+} else {
+  console.warn(`[register8004] env file not found: ${envPath}`)
 }
 
 // ── Registry addresses ─────────────────────────────────────────────
@@ -132,7 +139,6 @@ async function register(meta: AgentMeta): Promise<void> {
   const hex = (rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`) as Hex
   const account = privateKeyToAccount(hex)
   const wc = walletClient(hex)
-  const pub = publicClient()
 
   const uri = buildUri(meta, account.address)
 
@@ -150,28 +156,25 @@ async function register(meta: AgentMeta): Promise<void> {
       account: account.address,
     })
 
-    // Decode AgentRegistered event to get agentId
+    // Decode ERC-721 Transfer(from=0x0, to=agent, tokenId) to get agentId.
+    // The IdentityRegistry mints an ERC-721 token on register(); the Transfer
+    // event is: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+    // so topics layout is: [sig, from, to, tokenId] — tokenId is topics[3].
+    //
+    // Bug history: the first attempt read topics[1] (the "from" address, which is
+    // always 0x0 for a mint), so every agent got agentId=0. The fix is topics[3].
+    const ERC721_TRANSFER_SIG = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
     let agentId: string = '?'
     for (const logEntry of receipt.logs) {
       if (logEntry.address.toLowerCase() !== REGISTRY.toLowerCase()) continue
-      // AgentRegistered: topic[0] = sig, topic[1] = agentId (indexed uint256)
-      const topic1 = logEntry.topics[1]
-      if (logEntry.topics.length >= 2 && topic1) {
-        agentId = BigInt(topic1).toString()
+      // Match ERC-721 Transfer signature
+      if (logEntry.topics[0]?.toLowerCase() !== ERC721_TRANSFER_SIG) continue
+      // topics[1] = from (0x0 for mint), topics[2] = to (agent address), topics[3] = tokenId
+      const topic3 = logEntry.topics[3]
+      if (topic3) {
+        agentId = BigInt(topic3).toString()
         break
       }
-    }
-
-    // Also try readContract fallback in case log parsing fails
-    if (agentId === '?') {
-      try {
-        // getAgentWallet(id) starting from latest registered IDs
-        const total = await pub.readContract({
-          address: REGISTRY, abi: IDENTITY_REGISTRY_ABI,
-          functionName: 'getAgentWallet', args: [1n],
-        }) as Address
-        void total
-      } catch { /* ignore */ }
     }
 
     console.log(`  \x1b[32m[${meta.name}] registered → agentId ${agentId} (tx ${fmtTx(receipt.transactionHash)})\x1b[0m`)

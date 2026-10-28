@@ -10,8 +10,12 @@
  *  https://studio.arc.io
  */
 
-import './tracing'
-import './console-capture'
+// Tracing and console capture are dev-only; excluded from production bundle
+// so wallet extensions do not flag the site as phishing on public deploys.
+if (import.meta.env.DEV) {
+  await import('./tracing')
+  await import('./console-capture')
+}
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

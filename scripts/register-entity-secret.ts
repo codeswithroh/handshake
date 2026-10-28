@@ -53,7 +53,8 @@ async function main() {
   console.log("Losing either one means PERMANENT loss of access to all wallets.");
 }
 
-main().catch((e) => {
-  console.error("Registration failed:", e?.message ?? e);
+main().catch((e: unknown) => {
+  const msg = e instanceof Error ? e.message : String(e)
+  console.error("Registration failed:", msg);
   process.exit(1);
 });

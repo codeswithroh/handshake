@@ -27,10 +27,14 @@ import {
 } from './chain.js'
 import { HANDSHAKE_ABI, ERC20_ABI } from './abi.js'
 
-// ── Load agents/.env ───────────────────────────────────────────────
+// ── Load env file ──────────────────────────────────────────────────
+// Default: agents/.env  Override: ENV_FILE=agents/.env.mainnet npx tsx agents/worker.ts
 
 const __dir = dirname(fileURLToPath(import.meta.url))
-const envPath = resolve(__dir, '.env')
+const _envFileArg = process.env.ENV_FILE
+const envPath = _envFileArg
+  ? resolve(process.cwd(), _envFileArg)
+  : resolve(__dir, '.env')
 if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf8').split('\n')) {
     const trimmed = line.trim()
@@ -41,6 +45,9 @@ if (existsSync(envPath)) {
     const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
     if (!(key in process.env)) process.env[key] = val
   }
+  console.log(`[worker] env: ${envPath}`)
+} else {
+  console.warn(`[worker] env file not found: ${envPath}`)
 }
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -84,8 +91,10 @@ const EVALUATOR_MODEL = process.env.EVALUATOR_MODEL ?? 'claude-sonnet-5-5'
 
 // ── Cursor + processed set ─────────────────────────────────────────
 
-const CURSOR_PATH    = resolve(__dir, '.cursor.json')
-const PROCESSED_PATH = resolve(__dir, '.processed.json')
+// Per-network state files: a shared cursor made mainnet start from a testnet block height.
+const STATE_NETWORK  = process.env.NETWORK ?? 'testnet'
+const CURSOR_PATH    = resolve(__dir, `.cursor.${STATE_NETWORK}.json`)
+const PROCESSED_PATH = resolve(__dir, `.processed.${STATE_NETWORK}.json`)
 
 interface Cursor    { block: number }
 interface Processed { provider: string[]; evaluator: string[] }

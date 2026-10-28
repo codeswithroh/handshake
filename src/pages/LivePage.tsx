@@ -170,10 +170,17 @@ function useDistinctWallets(items: FeedItem[]): number {
 
 // ── Proof strip ───────────────────────────────────────────────────
 
+const MAINNET_DEPLOY_TX = '0x9555bce204a339b3ae5fb8288153820d23ea47211fda96740349d370dce51eca'
+const isMainnet = NETWORK.chainId === 5042
+
 function ProofStrip({ wallets }: { wallets: number }) {
   return (
-    <div className="rounded-xl px-4 py-3 mb-8 flex items-center gap-3 flex-wrap" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <Shield size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+    <div className="rounded-xl px-4 py-3 mb-8 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 flex-wrap" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Shield size={14} style={{ color: 'var(--green)' }} />
+        <span className="text-xs font-medium" style={{ color: 'var(--green)' }}>Proof</span>
+      </div>
+      <span className="hidden sm:block text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
       <span className="text-xs" style={{ color: 'var(--ink-2)' }}>
         Contract:{' '}
         <a
@@ -185,18 +192,34 @@ function ProofStrip({ wallets }: { wallets: number }) {
           {CONTRACT_ADDRESS.slice(0, 8)}…{CONTRACT_ADDRESS.slice(-6)}
         </a>
       </span>
-      <span className="text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
+      <span className="hidden sm:block text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
       <span className="text-xs" style={{ color: 'var(--ink-2)' }}>
-        <span className="mono" style={{ color: 'var(--ink)' }}>{wallets}</span> distinct wallets have transacted
+        <span className="mono" style={{ color: 'var(--ink)' }}>{wallets}</span> distinct wallets transacted
       </span>
-      <span className="text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
+      {isMainnet && (
+        <>
+          <span className="hidden sm:block text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
+          <span className="text-xs" style={{ color: 'var(--ink-2)' }}>
+            Deploy tx:{' '}
+            <a
+              href={`${NETWORK.explorerBase}/tx/${MAINNET_DEPLOY_TX}`}
+              target="_blank" rel="noopener noreferrer"
+              className="mono hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--muted)' }}
+            >
+              {MAINNET_DEPLOY_TX.slice(0, 10)}…
+            </a>
+          </span>
+        </>
+      )}
+      <span className="hidden sm:block text-xs" style={{ color: 'var(--border-strong)' }}>|</span>
       <a
         href={`${NETWORK.explorerBase}/address/${CONTRACT_ADDRESS}`}
         target="_blank" rel="noopener noreferrer"
         className="flex items-center gap-1 text-xs hover:opacity-80 transition-opacity"
         style={{ color: 'var(--muted)' }}
       >
-        View on explorer <ExternalLink size={10} />
+        Explorer <ExternalLink size={10} />
       </a>
     </div>
   )

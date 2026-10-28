@@ -10,14 +10,23 @@ dist/
 .env.local
 .env.*.local
 agents/.env
+agents/.env.mainnet
+agents/.env.*
+agents/.deployer-pass
+
+# Studio debug logs — never commit
+*.jsonl
 
 # Agent runtime state — safe to delete to reprocess
 agents/.cursor.json
 agents/.processed.json
+agents/.cursor.*.json
+agents/.processed.*.json
 
 # Foundry build artifacts
 contracts/out/
 contracts/cache/
+broadcast/
 
 # Circle recovery file — back up separately, never commit
 .circle/

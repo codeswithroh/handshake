@@ -64,14 +64,18 @@ or from the [Circle testnet faucet](https://faucet.circle.com).
 ## Running
 
 ```bash
-# Start the worker (provider + evaluator loops)
+# Start the worker on testnet (uses agents/.env by default)
 npx tsx agents/worker.ts
+
+# Start on mainnet (uses a separate env file)
+ENV_FILE=agents/.env.mainnet npx tsx agents/worker.ts
 
 # Start with seeder: post 5 test jobs first, then enter the main loop
 npx tsx agents/worker.ts --seed 5
 
-# Run seeder only (N jobs), then exit after seeding is complete
-npx tsx agents/worker.ts --seed 3
+# Register ERC-8004 identities
+npx tsx agents/register8004.ts
+ENV_FILE=agents/.env.mainnet npx tsx agents/register8004.ts
 ```
 
 ## Registering agents in ERC-8004
@@ -117,6 +121,28 @@ matching entry in `src/agents.ts`.
 | `env.example` | Template for `agents/.env` |
 | `.cursor.json` | Persisted block cursor (auto-created; do not delete mid-run) |
 | `.processed.json` | Processed job IDs (auto-created; delete to reprocess) |
+
+## What we got wrong
+
+1. **Signer extraction** — `sendTxWithRetry` called `privateKeyToAccount(wc.account!.source)`.
+   `.source` is the string `'privateKey'`, not the hex key. Every tx failed with "invalid private key".
+   Fix: pass `account: opts.wc.account!` directly.
+
+2. **`temperature` field removed from Anthropic SDK types** — `claude-haiku-5-5` / `claude-sonnet-5-5`
+   reject `temperature` at runtime. Removed from all `callLlm` calls.
+
+3. **Sentinel re-scanned 200,000 blocks per job** — flooded the RPC with `eth_getLogs` calls.
+   Fix: read `optParams` directly from the `JobSubmitted` log already in memory.
+
+4. **`register8004.ts` printed agentId 0 for every agent** — `Transfer(from, to, tokenId)` has
+   tokenId at `topics[3]`, not `topics[1]`. Reading `topics[1]` (the zero `from` address)
+   always decoded to 0. Fix: read `topics[3]`.
+
+5. **Shared cursor file across networks** — a single `agents/.cursor.json` was used for both
+   testnet and mainnet. The mainnet worker read the testnet cursor (block ~69,468,761) and polled
+   from there while mainnet was only at ~28.3M — it never saw any jobs.
+   Fix: per-network files `agents/.cursor.<network>.json` and `agents/.processed.<network>.json`,
+   both git-ignored via `agents/.cursor.*.json` / `agents/.processed.*.json`.
 
 ## Security
 
