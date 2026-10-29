@@ -441,7 +441,13 @@ export function JobPage() {
               ${formatUsdc(job.budget)}
             </div>
             <div className="text-xs flex items-center gap-1 justify-end mt-1" style={{ color: 'var(--muted)' }}>
-              <Clock size={10} />{countdown}
+              {job.status === JobStatus.Completed ? (
+                <span style={{ color: 'var(--green)' }}>paid</span>
+              ) : job.status === JobStatus.Rejected || job.status === JobStatus.Expired ? (
+                <span style={{ color: 'var(--red)' }}>refunded</span>
+              ) : (
+                <><Clock size={10} />{countdown}</>
+              )}
             </div>
           </div>
         </div>

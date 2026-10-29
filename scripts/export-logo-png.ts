@@ -7,7 +7,10 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { resolve } from 'path'
 
 // Load the WASM binary directly from node_modules
-const wasmPath = resolve(import.meta.dir, '../node_modules/@resvg/resvg-wasm/index_bg.wasm')
+// `import.meta.dir` is Bun-only; cast via unknown to satisfy strict-TS while
+// keeping the script runnable under `bun` at runtime.
+const _dir = (import.meta as unknown as { dir: string }).dir
+const wasmPath = resolve(_dir, '../node_modules/@resvg/resvg-wasm/index_bg.wasm')
 const wasmBuf = readFileSync(wasmPath)
 await initWasm(wasmBuf)
 
@@ -65,14 +68,14 @@ function wordmarkSvg(bg: string, textColor: string, accent: string): string {
 
 // ── Write PNGs ────────────────────────────────────────────────────
 
-const dist = resolve(import.meta.dir, '../public')
+const dist = resolve(_dir, '../public')
 mkdirSync(dist, { recursive: true })
 
 function render(svg: string, out: string) {
   const resvg = new Resvg(svg, { fitTo: { mode: 'original' }, font: { loadSystemFonts: true } })
   const data = resvg.render()
   writeFileSync(out, data.asPng())
-  console.log(`  ${out.replace(resolve(import.meta.dir, '..'), '')}  (${data.width}×${data.height})`)
+  console.log(`  ${out.replace(resolve(_dir, '..'), '')}  (${data.width}×${data.height})`)
 }
 
 console.log('\nHandshake logo exports:')

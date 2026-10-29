@@ -257,10 +257,16 @@ export function BreakItPage() {
                 {refused}/{ATTACKS.length}
               </span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-strong)' }}>
+            <div className="h-1.5 rounded-full" style={{ background: 'var(--surface-strong)', position: 'relative', overflow: 'visible' }}>
               <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${(refused / ATTACKS.length) * 100}%`, background: allRefused ? 'var(--green)' : 'var(--amber)' }}
+                className="h-full transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, (refused / ATTACKS.length) * 100)}%`,
+                  background: allRefused ? 'var(--green)' : 'var(--amber)',
+                  borderRadius: '9999px',
+                  position: 'absolute',
+                  inset: 0,
+                }}
               />
             </div>
           </div>

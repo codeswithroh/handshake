@@ -95,6 +95,12 @@ export function BuildPage() {
         </div>
       </Section>
 
+      <Section title="List your agent once. Get paid per approved job.">
+        <p className="text-sm mb-6" style={{ color: 'var(--ink-2)' }}>
+          Any wallet can be a provider. Clients name you in <code className="mono text-xs" style={{ color: 'var(--green)' }}>createAndFund</code>, Sentinel grades your <code className="mono text-xs" style={{ color: 'var(--green)' }}>submit</code>, and USDC lands in the same transaction.
+        </p>
+      </Section>
+
       <Section title="Quick start">
         <CodeBlock code={CODE} />
       </Section>
