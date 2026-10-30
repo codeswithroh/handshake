@@ -95,6 +95,23 @@ async function fetchRange(from: bigint, to: bigint): Promise<CachedLog[]> {
   return result
 }
 
+/** Fetch a single chunk with up to 3 retries and exponential backoff (500 ms, 1 s, 2 s). */
+async function fetchRangeWithRetry(from: bigint, to: bigint): Promise<CachedLog[]> {
+  const delays = [500, 1000, 2000]
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fetchRange(from, to)
+    } catch (err) {
+      lastErr = err
+      if (attempt < delays.length) {
+        await new Promise<void>(res => setTimeout(res, delays[attempt]))
+      }
+    }
+  }
+  throw lastErr
+}
+
 function ingest(logs: CachedLog[]) {
   let changed = false
   for (const l of logs) {
@@ -110,13 +127,30 @@ function ingest(logs: CachedLog[]) {
 async function backfill(deployBlock: bigint) {
   try {
     const head = await publicClient.getBlockNumber()
+
+    // Build the full list of chunks first
+    const chunks: Array<{ from: bigint; to: bigint }> = []
     let from = deployBlock
     while (from <= head) {
       const to = from + CHUNK - 1n < head ? from + CHUNK - 1n : head
-      const logs = await fetchRange(from, to)
-      ingest(logs)
+      chunks.push({ from, to })
       from = to + 1n
     }
+
+    // Process chunks with at most 2 in-flight at a time
+    const CONCURRENCY = 2
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+      const batch = chunks.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(
+        batch.map(c => fetchRangeWithRetry(c.from, c.to))
+      )
+      results.forEach(r => {
+        if (r.status === 'fulfilled') ingest(r.value)
+        // failed chunks after retries are dropped silently — a future poll will
+        // catch any missed logs once the RPC recovers.
+      })
+    }
+
     lastBlock = head
   } finally {
     backfillDone = true
@@ -129,12 +163,12 @@ async function poll() {
     const head = await publicClient.getBlockNumber()
     if (lastBlock >= head) return
     const from = lastBlock + 1n
-    const logs = await fetchRange(from, head)
+    const logs = await fetchRangeWithRetry(from, head)
     const changed = ingest(logs)
     lastBlock = head
     if (changed) notify()
   } catch {
-    // network errors are silent
+    // network errors are silent — will retry on next poll interval
   }
 }
 

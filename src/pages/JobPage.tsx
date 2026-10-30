@@ -1,10 +1,10 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { keccak256, toBytes, type Log } from 'viem'
 import { CONTRACT_ADDRESS, CONTRACT_ABI, JobStatus, type JobStruct } from '../contract'
 import { NETWORK, TARGET_CHAIN_ID } from '../config'
-import { publicClient, EVENT_ABIS, startCache } from '../lib/eventCache'
+import { publicClient, subscribeLogs, startCache, type CachedLog } from '../lib/eventCache'
 import { StatusPill } from '../components/StatusPill'
 import { ChainGuard } from '../components/ChainGuard'
 import { formatUsdc, fmtAddr, fmtTs, fmtHash, fmtCountdown } from '../lib/format'
@@ -15,6 +15,9 @@ import { toast } from 'sonner'
 
 // Ensure cache is warm
 startCache(NETWORK.deployBlock)
+
+// ── Block-timestamp cache (module-level, shared across job pages) ───
+const blockTsCache = new Map<bigint, number>()
 
 // ── Utilities ──────────────────────────────────────────────────────
 
@@ -60,103 +63,132 @@ interface TimelineEvent {
   accent: string
 }
 
+/** Resolve block timestamps for a set of block numbers, using a module-level cache. */
+async function resolveTimestamps(blockNums: Set<bigint>): Promise<Map<bigint, number>> {
+  const missing = [...blockNums].filter(n => !blockTsCache.has(n))
+  if (missing.length) {
+    const blocks = await Promise.all(missing.map(n => publicClient.getBlock({ blockNumber: n })))
+    blocks.forEach(b => { blockTsCache.set(b.number, Number(b.timestamp)) })
+  }
+  return new Map([...blockNums].map(n => [n, blockTsCache.get(n) ?? 0]))
+}
+
+/** Build the timeline + derived state from a flat array of cached logs for one job. */
+async function buildFromLogs(
+  jobLogs: CachedLog[],
+): Promise<{
+  events: TimelineEvent[]
+  deliverableText: string
+  verdictText: string
+  fundedAt: number
+  submittedAt: number
+}> {
+  // Group by event type
+  const byType = (name: string) => jobLogs.filter(l => l.eventName === name)
+
+  const created   = byType('JobCreated')[0]   ?? null
+  const funded    = byType('JobFunded')[0]    ?? null
+  const submitted = byType('JobSubmitted')[0] ?? null
+  const completed = byType('JobCompleted')[0] ?? null
+  const rejected  = byType('JobRejected')[0]  ?? null
+  const allRefunded = byType('Refunded')
+
+  // Collect block numbers to resolve
+  const blockNums = new Set<bigint>()
+  ;[created, funded, submitted, completed, rejected, ...allRefunded].forEach(l => {
+    if (l?.blockNumber) blockNums.add(l.blockNumber)
+  })
+
+  const tsMap = blockNums.size ? await resolveTimestamps(blockNums) : new Map<bigint, number>()
+  const ts = (l: CachedLog | null) => tsMap.get(l?.blockNumber ?? 0n) ?? 0
+
+  const evts: TimelineEvent[] = []
+
+  if (created) {
+    evts.push({ step: 'Created', ts: ts(created), txHash: created.transactionHash ?? '', accent: 'var(--ink-2)' })
+  }
+
+  let fundedAt = 0
+  if (funded) {
+    const args = (funded as Log & { args?: { amount?: bigint } }).args
+    fundedAt = ts(funded)
+    evts.push({
+      step: 'Funded', ts: fundedAt, txHash: funded.transactionHash ?? '',
+      detail: args?.amount != null ? `$${formatUsdc(args.amount)} USDC escrowed` : '',
+      accent: 'var(--amber)',
+    })
+  }
+
+  let deliverableText = ''
+  let submittedAt = 0
+  if (submitted) {
+    const args = (submitted as Log & { args?: { optParams?: `0x${string}` } }).args
+    deliverableText = decodeOptParams(args?.optParams ?? '0x')
+    submittedAt = ts(submitted)
+    evts.push({ step: 'Delivered', ts: submittedAt, txHash: submitted.transactionHash ?? '', accent: 'var(--amber)' })
+  }
+
+  let verdictText = ''
+  if (completed) {
+    const args = (completed as Log & { args?: { optParams?: `0x${string}`; providerPayout?: bigint; evaluatorFee?: bigint } }).args
+    verdictText = decodeOptParams(args?.optParams ?? '0x')
+    const payout = args?.providerPayout != null && args?.evaluatorFee != null
+      ? `$${formatUsdc((args.providerPayout ?? 0n) + (args.evaluatorFee ?? 0n))} paid out` : ''
+    evts.push({ step: 'Paid', ts: ts(completed), txHash: completed.transactionHash ?? '', detail: payout, accent: 'var(--green)' })
+  }
+
+  if (rejected) {
+    const args = (rejected as Log & { args?: { optParams?: `0x${string}`; refund?: bigint } }).args
+    if (!verdictText) verdictText = decodeOptParams(args?.optParams ?? '0x')
+    const refund = args?.refund != null ? `$${formatUsdc(args.refund)} refunded` : ''
+    evts.push({ step: 'Rejected', ts: ts(rejected), txHash: rejected.transactionHash ?? '', detail: refund, accent: 'var(--red)' })
+  }
+
+  // Only show "Expired · refunded" for claimRefund path (standalone Refunded, not co-tx with Rejected)
+  const rejectedTxHash = rejected?.transactionHash ?? null
+  const expiredRefund = allRefunded.find(l => l.transactionHash !== rejectedTxHash) ?? null
+  if (expiredRefund) {
+    const args = (expiredRefund as Log & { args?: { amount?: bigint } }).args
+    evts.push({
+      step: 'Expired · refunded', ts: ts(expiredRefund), txHash: expiredRefund.transactionHash ?? '',
+      detail: args?.amount != null ? `$${formatUsdc(args.amount)} returned` : '',
+      accent: 'var(--red)',
+    })
+  }
+
+  evts.sort((a, b) => a.ts - b.ts)
+  return { events: evts, deliverableText, verdictText, fundedAt, submittedAt }
+}
+
 function useJobEvents(jobId: bigint) {
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [deliverableText, setDeliverableText] = useState('')
   const [verdictText, setVerdictText] = useState('')
-  const [fundedAt, setFundedAt] = useState(0)          // unix ts of JobFunded
-  const [submittedAt, setSubmittedAt] = useState(0)    // unix ts of JobSubmitted
-  const seenSubmit = useRef(false)
+  const [fundedAt, setFundedAt] = useState(0)
+  const [submittedAt, setSubmittedAt] = useState(0)
+
+  // Stable callback that rebuilds state from a fresh snapshot
+  const rebuild = useCallback((allLogs: CachedLog[]) => {
+    const jobLogs = allLogs.filter(l => {
+      const args = (l as Log & { args?: Record<string, unknown> }).args ?? {}
+      return (args.jobId as bigint | undefined) === jobId
+    })
+    // Always update synchronously if there are no blocks to resolve (common after backfill)
+    void buildFromLogs(jobLogs).then(result => {
+      setEvents(result.events)
+      setDeliverableText(result.deliverableText)
+      setVerdictText(result.verdictText)
+      setFundedAt(result.fundedAt)
+      setSubmittedAt(result.submittedAt)
+    })
+  }, [jobId])
 
   useEffect(() => {
     if (!jobId) return
-    let alive = true
-
-    async function load() {
-      try {
-        const results = await Promise.allSettled([
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.JobCreated,   fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.JobFunded,    fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.JobSubmitted, fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.JobCompleted, fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.JobRejected,  fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-          publicClient.getLogs({ address: CONTRACT_ADDRESS, event: EVENT_ABIS.Refunded,     fromBlock: NETWORK.deployBlock, toBlock: 'latest', args: { jobId } }),
-        ])
-
-        if (!alive) return
-
-        const blockNums = new Set<bigint>()
-        results.forEach(r => { if (r.status === 'fulfilled') r.value.forEach(l => l.blockNumber && blockNums.add(l.blockNumber)) })
-        const blocks = await Promise.all([...blockNums].map(n => publicClient.getBlock({ blockNumber: n })))
-        const tsMap = new Map(blocks.map(b => [b.number, Number(b.timestamp)]))
-
-        const evts: TimelineEvent[] = []
-
-        const created = results[0].status === 'fulfilled' ? results[0].value[0] : null
-        if (created) evts.push({ step: 'Created', ts: tsMap.get(created.blockNumber ?? 0n) ?? 0, txHash: created.transactionHash ?? '', accent: 'var(--ink-2)' })
-
-        const funded = results[1].status === 'fulfilled' ? results[1].value[0] : null
-        if (funded) {
-          const args = (funded as Log & { args?: { amount?: bigint } }).args
-          const ts = tsMap.get(funded.blockNumber ?? 0n) ?? 0
-          setFundedAt(ts)
-          evts.push({ step: 'Funded', ts, txHash: funded.transactionHash ?? '', detail: args?.amount != null ? `$${formatUsdc(args.amount)} USDC escrowed` : '', accent: 'var(--amber)' })
-        }
-
-        const submitted = results[2].status === 'fulfilled' ? results[2].value[0] : null
-        if (submitted) {
-          const args = (submitted as Log & { args?: { optParams?: `0x${string}` } }).args
-          const text = decodeOptParams(args?.optParams ?? '0x')
-          if (text) setDeliverableText(text)
-          const ts = tsMap.get(submitted.blockNumber ?? 0n) ?? 0
-          setSubmittedAt(ts)
-          evts.push({ step: 'Delivered', ts, txHash: submitted.transactionHash ?? '', accent: 'var(--amber)' })
-        }
-
-        const completed = results[3].status === 'fulfilled' ? results[3].value[0] : null
-        if (completed) {
-          const args = (completed as Log & { args?: { optParams?: `0x${string}`; providerPayout?: bigint; evaluatorFee?: bigint } }).args
-          const text = decodeOptParams(args?.optParams ?? '0x')
-          if (text) setVerdictText(text)
-          const payout = args?.providerPayout != null && args?.evaluatorFee != null ? `$${formatUsdc((args.providerPayout ?? 0n) + (args.evaluatorFee ?? 0n))} paid out` : ''
-          evts.push({ step: 'Paid', ts: tsMap.get(completed.blockNumber ?? 0n) ?? 0, txHash: completed.transactionHash ?? '', detail: payout, accent: 'var(--green)' })
-        }
-
-        const rejected = results[4].status === 'fulfilled' ? results[4].value[0] : null
-        if (rejected) {
-          const args = (rejected as Log & { args?: { optParams?: `0x${string}`; refund?: bigint } }).args
-          const text = decodeOptParams(args?.optParams ?? '0x')
-          if (text) setVerdictText(text)
-          const refund = args?.refund != null ? `$${formatUsdc(args.refund)} refunded` : ''
-          evts.push({ step: 'Rejected', ts: tsMap.get(rejected.blockNumber ?? 0n) ?? 0, txHash: rejected.transactionHash ?? '', detail: refund, accent: 'var(--red)' })
-        }
-
-        // Only show a "Expired · refunded" timeline step when the Refunded event
-        // came from a claimRefund() call — i.e. its tx hash is NOT the same as
-        // the JobRejected tx (where the Refunded is just the internal payout).
-        const rejectedTxHash = rejected?.transactionHash ?? null
-        const refunded = results[5].status === 'fulfilled'
-          ? results[5].value.find(l => l.transactionHash !== rejectedTxHash)
-          : null
-        if (refunded) {
-          const args = (refunded as Log & { args?: { amount?: bigint } }).args
-          evts.push({ step: 'Expired · refunded', ts: tsMap.get(refunded.blockNumber ?? 0n) ?? 0, txHash: refunded.transactionHash ?? '', detail: args?.amount != null ? `$${formatUsdc(args.amount)} returned` : '', accent: 'var(--red)' })
-        }
-
-        // Track first arrival of submit for typewriter trigger
-        if (submitted && !seenSubmit.current) seenSubmit.current = true
-
-        evts.sort((a, b) => a.ts - b.ts)
-        setEvents(evts)
-      } catch {
-        // silent
-      }
-    }
-
-    void load()
-    const t = setInterval(() => { void load() }, 5000)
-    return () => { alive = false; clearInterval(t) }
-  }, [jobId])
+    // subscribeLogs immediately calls rebuild with the current snapshot,
+    // then calls again on every cache update (backfill completion, poll).
+    return subscribeLogs(rebuild)
+  }, [jobId, rebuild])
 
   return { events, deliverableText, verdictText, fundedAt, submittedAt }
 }
